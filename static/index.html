@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>るる鯖 過去ログアーカイバー（完全版）</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip for creating ZIP files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- FileSaver for triggering downloads -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        jinro: {
+                            bg: '#1a1a1a',
+                            panel: '#2d2d2d',
+                            accent: '#e53e3e',
+                            text: '#e2e8f0'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #e2e8f0;
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            background-image: radial-gradient(circle at center, #2a2a2a 0%, #111 100%);
+            min-height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(45, 45, 45, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .moon-bg {
+            position: fixed;
+            top: -10%;
+            right: -10%;
+            width: 40vw;
+            height: 40vw;
+            background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body class="antialiased flex items-center justify-center p-4">
+    <div class="moon-bg"></div>
+
+    <div class="w-full max-w-2xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-red-500 mb-2 tracking-wider">
+                <i class="fa-solid fa-moon mr-2"></i>るる鯖 過去ログアーカイバー
+            </h1>
+            <p class="text-gray-400">17年間の思い出を、デザインごと完全保存。</p>
+        </div>
+
+        <!-- Main Panel -->
+        <div class="glass-panel rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+            <div id="step1-input">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-600 pb-2">アカウント情報の入力</h2>
+                <p class="text-sm text-gray-400 mb-6">
+                    保存したいアカウントの名前（HN、またはHN◆トリップ）を入力してください。<br>
+                    例: <code class="bg-black px-2 py-1 rounded text-red-400">幽助◆16-ZTx8e-L</code>
+                </p>
+                
+                <div class="flex flex-col gap-4 mb-4">
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <input type="text" id="account-name" placeholder="幽助◆16-ZTx8e-L" 
+                               class="flex-1 bg-black bg-opacity-50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-red-500 transition-colors">
+                        <button id="btn-search" onclick="startSearch()"
+                                class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap">
+                            <i class="fa-solid fa-search"></i> 参加村を探す
+                        </button>
+                    </div>
+                    
+                    <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer bg-black bg-opacity-30 p-3 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+                        <input type="checkbox" id="full-download" checked class="w-5 h-5 text-red-600 rounded focus:ring-red-500 bg-gray-700 border-gray-600">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-white">無システム・霊界ログを含める（完全版）</span>
+                            <span class="text-xs text-gray-400 mt-0.5">※チェックを外すとメインログのみ保存し、時間を大幅に短縮できます。どちらの場合でもデザイン（CSS等）と個人成績ページは保存されます。</span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="step2-loading" class="hidden text-center py-8">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500 mb-4"></div>
+                <h3 class="text-xl font-medium" id="loading-text">参加した村を検索中...</h3>
+                <p class="text-gray-400 text-sm mt-2">※全ページをスキャンするため少し時間がかかります</p>
+            </div>
+
+            <!-- Download State -->
+            <div id="step3-download" class="hidden">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-600 pb-2 flex justify-between items-end">
+                    <span>ダウンロードの進行状況</span>
+                    <span id="village-count-badge" class="text-sm bg-red-900 text-red-200 px-3 py-1 rounded-full">計 0 件</span>
+                </h2>
+                
+                <div class="bg-black bg-opacity-50 rounded-lg p-4 mb-6">
+                    <div class="flex justify-between text-sm mb-2">
+                        <span id="progress-text" class="text-gray-300">準備中...</span>
+                        <span id="progress-percentage" class="text-red-400 font-bold">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-4 overflow-hidden">
+                        <div id="progress-bar" class="bg-red-600 h-4 rounded-full transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="text-sm text-gray-400 bg-red-900 bg-opacity-20 border border-red-900 rounded p-4 mb-4">
+                    <i class="fa-solid fa-triangle-exclamation text-red-500 mr-2"></i>
+                    サーバー負荷軽減のため、1件ずつ3秒の間隔を空けてダウンロードします。<br>
+                    <strong>※途中でこの画面を閉じたり、再読み込みしないでください。</strong>
+                </div>
+
+                <div id="log-container" class="h-40 overflow-y-auto bg-black bg-opacity-50 rounded p-2 text-xs font-mono text-gray-300">
+                    <!-- Logs will appear here -->
+                </div>
+            </div>
+
+            <!-- Complete State -->
+            <div id="step4-complete" class="hidden text-center py-8">
+                <div class="text-5xl text-green-500 mb-4">
+                    <i class="fa-solid fa-circle-check"></i>
+                </div>
+                <h2 class="text-2xl font-bold mb-2">完了しました！</h2>
+                <p class="text-gray-300 mb-6" id="complete-message">ZIPファイルのダウンロードが自動的に開始されます。</p>
+                <button onclick="resetApp()" class="text-gray-400 hover:text-white underline">
+                    最初からやり直す
+                </button>
+            </div>
+        </div>
+        
+        <div class="text-center mt-6 text-gray-600 text-sm">
+            <p>非公式ツールです。るる鯖の規約に従い、常識の範囲内でご利用ください。</p>
+        </div>
+    </div>
+
+    <script>
+        const UI = {
+            step1: document.getElementById('step1-input'),
+            step2: document.getElementById('step2-loading'),
+            step3: document.getElementById('step3-download'),
+            step4: document.getElementById('step4-complete'),
+            logContainer: document.getElementById('log-container'),
+            progressBar: document.getElementById('progress-bar'),
+            progressText: document.getElementById('progress-text'),
+            progressPercent: document.getElementById('progress-percentage'),
+            countBadge: document.getElementById('village-count-badge')
+        };
+
+        const COMMON_ASSETS = [
+            "css/werewolf.css",
+            "css/werewolf_day.css",
+            "css/werewolf_night.css",
+            "css/base.css",
+            "js/jquery-1.9.0.js",
+            "js/jquery-ui.min.js",
+            "js/jquery.cookie.js",
+            "js/common.js",
+            "js/village.js",
+            "js/spin.min.js",
+            "js/ad.js",
+            "js/overlib.js",
+            "fonts/fontawesome-webfont.woff2",
+            "fonts/fontawesome-webfont.woff",
+            "fonts/fontawesome-webfont.ttf",
+            "title/011.png",
+            "images/kami.png",
+            ...[
+                "001a", "001as", "001d", "001ds", "001w", "001ws",
+                "002a", "002as", "002d", "002ds", "002w", "002ws",
+                "003a", "003as", "003d", "003ds", "003w", "003ws",
+                "004a", "004as", "004d", "004ds", "004w", "004ws",
+                "005a", "005as", "005d", "005ds", "005w", "005ws",
+                "006a", "006as", "006d", "006ds", "006w", "006ws",
+                "007a", "007as", "007d", "007ds", "007w", "007ws",
+                "008a", "008as", "008d", "008ds", "008w", "008ws",
+                "009a", "009as", "009d", "009ds", "009w", "009ws",
+                "010a", "010as", "010d", "010ds", "010w", "010ws",
+                "011a", "011as", "011d", "011ds", "011w", "011ws",
+                "012a", "012as", "012d", "012ds", "012w", "012ws",
+                "013a", "013as", "013d", "013ds", "013w", "013ws",
+                "014a", "014as", "014d", "014ds", "014w", "014ws",
+                "015a", "015as", "015d", "015ds", "015w", "015ws",
+                "016a", "016as", "016d", "016ds", "016w", "016ws",
+                "017a", "017as", "017d", "017ds", "017w", "017ws",
+                "018a", "018as", "018d", "018ds", "018w", "018ws",
+                "019a", "019as", "019d", "019ds", "019w", "019ws",
+                "020a", "020as", "020d", "020ds", "020w", "020ws",
+                "021a", "021as", "021d", "021ds", "021w", "021ws",
+                "022a", "022as", "022d", "022ds", "022w", "022ws",
+                "dicons", "icons", "wicons"
+            ].map(name => `icon/${name}.jpg`)
+        ];
+
+        function showStep(stepName) {
+            UI.step1.classList.add('hidden');
+            UI.step2.classList.add('hidden');
+            UI.step3.classList.add('hidden');
+            UI.step4.classList.add('hidden');
+            UI[stepName].classList.remove('hidden');
+        }
+
+        function addLog(message) {
+            const el = document.createElement('div');
+            el.textContent = `> ${message}`;
+            UI.logContainer.appendChild(el);
+            UI.logContainer.scrollTop = UI.logContainer.scrollHeight;
+        }
+
+        async function startSearch() {
+            const input = document.getElementById('account-name').value.trim();
+            if (!input) {
+                alert('アカウント名を入力してください。');
+                return;
+            }
+
+            showStep('step2');
+
+            try {
+                // Fetch index pages and log list from backend
+                const response = await fetch(`/api/fetch_index?name=${encodeURIComponent(input)}`);
+                if (!response.ok) throw new Error('サーバーエラーが発生しました。');
+                
+                const data = await response.json();
+                
+                if (data.log_files.length === 0) {
+                    alert('参加した村が見つかりませんでした。入力名を確認してください。');
+                    showStep('step1');
+                    return;
+                }
+
+                startDownload(data);
+
+            } catch (error) {
+                alert(error.message);
+                showStep('step1');
+            }
+        }
+
+        async function startDownload(data) {
+            showStep('step3');
+            UI.logContainer.innerHTML = '';
+            
+            const isFullDownload = document.getElementById('full-download').checked;
+            
+            let targetLogs = data.log_files;
+            if (!isFullDownload) {
+                // Filter out _n.html and _r.html
+                targetLogs = targetLogs.filter(p => !p.includes('_n.html') && !p.includes('_r.html'));
+            }
+
+            UI.countBadge.textContent = `計 ${targetLogs.length} ログ`;
+            addLog(`${data.account} さんのログアーカイブ（全 ${targetLogs.length} 件）を開始します...`);
+
+            const zip = new JSZip();
+            const folderName = `ruru_logs_${data.account.replace(/[^a-zA-Z0-9ぁ-んァ-ヶｱ-ﾝﾞﾟ一-龠◆-]/g, '_')}`;
+            const folder = zip.folder(folderName);
+            
+            let successCount = 0;
+            let errorCount = 0;
+
+            // 1. Save merged index page
+            addLog(`個人成績ページ（全ページ合体版）を保存中...`);
+            if (data.merged_html) {
+                folder.file("index.html", data.merged_html);
+                addLog(`  -> index.html（検索機能付き）の保存完了`);
+            } else {
+                addLog(`  -> エラー: インデックスデータがありません`);
+            }
+
+            // 2. Download Assets (No artificial delay, they are static and fast)
+            addLog(`デザイン適用用のアセット（CSS/JS）を取得中...`);
+            for(const asset of COMMON_ASSETS) {
+                try {
+                    const res = await fetch(`/api/proxy?path=${encodeURIComponent(asset)}`);
+                    if (res.ok) {
+                        const blob = await res.blob();
+                        folder.file(asset, blob); // Automagically creates css/ or js/ folder inside zip!
+                    }
+                } catch(e) { 
+                    console.error("Asset download failed:", asset, e); 
+                }
+            }
+            addLog(`  -> アセット取得完了`);
+
+            // 3. Download Logs
+            addLog(`-----------------------------------------`);
+            addLog(`ログHTMLのダウンロードを開始します。`);
+            addLog(`※1件につき3秒の待機時間を入れています。`);
+            addLog(`-----------------------------------------`);
+            
+            for (let i = 0; i < targetLogs.length; i++) {
+                const logPath = targetLogs[i]; // e.g. log6/log508746_n.html
+                const currentIndex = i + 1;
+                const total = targetLogs.length;
+                
+                // Update UI progress
+                const percent = Math.floor((currentIndex / total) * 100);
+                UI.progressBar.style.width = `${percent}%`;
+                UI.progressPercent.textContent = `${percent}%`;
+                
+                const logFilename = logPath.split('/').pop();
+                UI.progressText.textContent = `[${currentIndex}/${total}] ${logFilename} を取得中...`;
+                
+                addLog(`取得中: ${logFilename} (${currentIndex}/${total})`);
+
+                try {
+                    const res = await fetch(`/api/proxy?path=${encodeURIComponent(logPath)}`);
+                    if (!res.ok) throw new Error(`Status ${res.status}`);
+                    
+                    const blob = await res.blob();
+                    
+                    // We save logs into the "logs/" folder so that ../css/werewolf.css works perfectly
+                    folder.file(`logs/${logFilename}`, blob);
+                    successCount++;
+                    addLog(`  -> 保存成功`);
+                } catch (e) {
+                    errorCount++;
+                    addLog(`  -> エラー: ${e.message}`);
+                }
+
+                // Wait 3 seconds before next request
+                if (i < targetLogs.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+            }
+
+            addLog(`\nすべての処理が完了しました。ZIPファイルを圧縮しています...`);
+            UI.progressText.textContent = `ZIP圧縮中...`;
+
+            try {
+                const content = await zip.generateAsync({ type: "blob" });
+                saveAs(content, `${folderName}.zip`);
+                
+                showStep('step4');
+                document.getElementById('complete-message').innerHTML = 
+                    `個人成績ページ、デザイン用アセット、および ${successCount}件のログを保存しました。<br>` + 
+                    (errorCount > 0 ? `<span class="text-red-400">${errorCount}件の取得エラーがありました。</span>` : '');
+                    
+            } catch (e) {
+                addLog(`ZIP作成エラー: ${e.message}`);
+                alert("ZIPファイルの作成に失敗しました。");
+            }
+        }
+
+        function resetApp() {
+            document.getElementById('account-name').value = '';
+            showStep('step1');
+        }
+    </script>
+</body>
+</html>

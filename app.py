@@ -269,7 +269,33 @@ def proxy_path(path: str = Query(..., description="Path relative to ruru-jinro.n
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+@app.get("/api/debug_fetch")
+def debug_fetch(hn: str = Query(..., description="HN to test")):
+    url = "https://ruru-jinro.net/villagerlog.jsp"
+    params = {"hn": hn, "trip": "", "st": 1, "sort": "VILLAGE_NUMBER"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response.encoding = response.apparent_encoding
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.select_one("table#villagerlog tbody")
+        trs = table.find_all("tr") if table else []
+        links = soup.find_all('a', href=True)
+        log_links = [a['href'] for a in links if re.search(r'log\d*/log\d+.*\.html', a['href'])]
+        return {
+            "status_code": response.status_code,
+            "encoding": response.encoding,
+            "final_url": str(response.url),
+            "html_head_500chars": response.text[:500],
+            "table_found": table is not None,
+            "tr_count": len(trs),
+            "log_link_count": len(log_links),
+            "log_links_sample": log_links[:5],
+        }
+    except Exception as e:
+        return {"error": str(e)}
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8001)

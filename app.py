@@ -40,36 +40,25 @@ def fetch_index(name: str = Query(..., description="Account name like 幽助◆1
     all_trs = []
 
     while True:
-        url = f"https://ruru-jinro.net/villagerlog.jsp"
+     base_url = "https://ruru-jinro.net/villagerlog.jsp"
         params = {
             "hn": hn,
             "trip": trip,
             "st": page,
             "sort": "VILLAGE_NUMBER"
         }
+        # RenderのIPがるる鯖にブロックされているため、allorigins.winプロキシ経由で取得
+        target_url = base_url + "?" + urllib.parse.urlencode(params)
+        proxy_url = f"https://api.allorigins.win/get?url={urllib.parse.quote(target_url)}"
         
         try:
-            # We must use proper User-Agent to avoid being blocked
-           headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Referer": "https://ruru-jinro.net/",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1",
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "same-origin",
-                "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124"',
-                "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": '"Windows"',
-            }
-            session = requests.Session()
-            # まずトップページを叩いてCookieを取得する
-            session.get("https://ruru-jinro.net/", headers=headers, timeout=10)
-            response = session.get(url, params=params, headers=headers, timeout=10)
-            response.encoding = response.apparent_encoding
+            proxy_response = requests.get(proxy_url, timeout=20)
+            if proxy_response.status_code != 200:
+                break
+            html_text = proxy_response.json().get("contents", "")
+            if not html_text:
+                break
+            soup = BeautifulSoup(html_text, 'html.parser')
             
             if response.status_code != 200:
                 break
@@ -308,8 +297,7 @@ def debug_fetch(hn: str = Query(..., description="HN to test")):
         # まずトップページを叩いてCookieを取得する
         session.get("https://ruru-jinro.net/", headers=headers, timeout=10)
         response = session.get(url, params=params, headers=headers, timeout=15)
-        response.encoding = response.apparent_encoding
-        soup = BeautifulSoup(response.text, 'html.parser')
+        response.encoding = response.apparent_encoding)
         table = soup.select_one("table#villagerlog tbody")
         trs = table.find_all("tr") if table else []
         links = soup.find_all('a', href=True)

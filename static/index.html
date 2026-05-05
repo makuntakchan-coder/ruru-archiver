@@ -152,18 +152,50 @@
     <script>
         // ====================================================================
         // 設定
-        // ブラウザ側から直接るる鯖にアクセスするためCORSプロキシを使用
-        // （サーバー経由だとRenderのIPがブロックされるため）
+        // Google Apps Script をプロキシとして使用
+        // （RenderやCORSプロキシのIPはるる鯖にブロックされるため、
+        //   GoogleサーバーのIPを経由することで回避する）
         // ====================================================================
-        const PROXY_BASE = 'https://corsproxy.io/?';
-        const RURU_BASE  = 'https://ruru-jinro.net';
+        const GAS_URL   = 'https://script.google.com/macros/s/AKfycbyFQPgwoihNoUug0Jr69BX6M7BeNCXlVyXx2btVmJcQzFVyZ3xFwysT5gzH8ZwwGAkL/exec';
+        const RURU_BASE = 'https://ruru-jinro.net';
 
-        // プロキシ経由でURLを取得するヘルパー
+        // GASプロキシ経由でURLを取得するヘルパー
+        // GASはバイナリを base64 エンコードした JSON を返す
         async function fetchViaProxy(url, asBlob = false) {
-            const proxyUrl = PROXY_BASE + encodeURIComponent(url);
+            const proxyUrl = GAS_URL + '?url=' + encodeURIComponent(url);
             const res = await fetch(proxyUrl);
-            if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
-            return asBlob ? res.blob() : res.text();
+            if (!res.ok) throw new Error(`プロキシエラー: ${res.status}`);
+
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            if (data.status >= 400) throw new Error(`HTTP ${data.status}: ${url}`);
+
+            // Base64 → バイト配列に変換
+            const binaryStr = atob(data.base64);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+
+            if (asBlob) {
+                return new Blob([bytes], { type: data.contentType || 'application/octet-stream' });
+            }
+
+            // テキストとして返す（エンコーディング自動検出）
+            const ct = data.contentType || '';
+            let encoding = 'utf-8';
+            const charsetMatch = ct.match(/charset=([^\s;]+)/i);
+            if (charsetMatch) encoding = charsetMatch[1];
+            // ascii / 不明な場合は Shift-JIS を試みる（古い日本語サイト対策）
+            if (['ascii', 'us-ascii'].includes(encoding.toLowerCase())) {
+                encoding = 'shift-jis';
+            }
+            try {
+                return new TextDecoder(encoding).decode(bytes);
+            } catch (e) {
+                try { return new TextDecoder('shift-jis').decode(bytes); }
+                catch (e2) { return new TextDecoder('utf-8').decode(bytes); }
+            }
         }
 
         const UI = {

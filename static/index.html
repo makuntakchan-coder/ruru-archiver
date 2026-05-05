@@ -150,6 +150,22 @@
     </div>
 
     <script>
+        // ====================================================================
+        // 設定
+        // ブラウザ側から直接るる鯖にアクセスするためCORSプロキシを使用
+        // （サーバー経由だとRenderのIPがブロックされるため）
+        // ====================================================================
+        const PROXY_BASE = 'https://corsproxy.io/?';
+        const RURU_BASE  = 'https://ruru-jinro.net';
+
+        // プロキシ経由でURLを取得するヘルパー
+        async function fetchViaProxy(url, asBlob = false) {
+            const proxyUrl = PROXY_BASE + encodeURIComponent(url);
+            const res = await fetch(proxyUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+            return asBlob ? res.blob() : res.text();
+        }
+
         const UI = {
             step1: document.getElementById('step1-input'),
             step2: document.getElementById('step2-loading'),
@@ -181,29 +197,29 @@
             "title/011.png",
             "images/kami.png",
             ...[
-                "001a", "001as", "001d", "001ds", "001w", "001ws",
-                "002a", "002as", "002d", "002ds", "002w", "002ws",
-                "003a", "003as", "003d", "003ds", "003w", "003ws",
-                "004a", "004as", "004d", "004ds", "004w", "004ws",
-                "005a", "005as", "005d", "005ds", "005w", "005ws",
-                "006a", "006as", "006d", "006ds", "006w", "006ws",
-                "007a", "007as", "007d", "007ds", "007w", "007ws",
-                "008a", "008as", "008d", "008ds", "008w", "008ws",
-                "009a", "009as", "009d", "009ds", "009w", "009ws",
-                "010a", "010as", "010d", "010ds", "010w", "010ws",
-                "011a", "011as", "011d", "011ds", "011w", "011ws",
-                "012a", "012as", "012d", "012ds", "012w", "012ws",
-                "013a", "013as", "013d", "013ds", "013w", "013ws",
-                "014a", "014as", "014d", "014ds", "014w", "014ws",
-                "015a", "015as", "015d", "015ds", "015w", "015ws",
-                "016a", "016as", "016d", "016ds", "016w", "016ws",
-                "017a", "017as", "017d", "017ds", "017w", "017ws",
-                "018a", "018as", "018d", "018ds", "018w", "018ws",
-                "019a", "019as", "019d", "019ds", "019w", "019ws",
-                "020a", "020as", "020d", "020ds", "020w", "020ws",
-                "021a", "021as", "021d", "021ds", "021w", "021ws",
-                "022a", "022as", "022d", "022ds", "022w", "022ws",
-                "dicons", "icons", "wicons"
+                "001a","001as","001d","001ds","001w","001ws",
+                "002a","002as","002d","002ds","002w","002ws",
+                "003a","003as","003d","003ds","003w","003ws",
+                "004a","004as","004d","004ds","004w","004ws",
+                "005a","005as","005d","005ds","005w","005ws",
+                "006a","006as","006d","006ds","006w","006ws",
+                "007a","007as","007d","007ds","007w","007ws",
+                "008a","008as","008d","008ds","008w","008ws",
+                "009a","009as","009d","009ds","009w","009ws",
+                "010a","010as","010d","010ds","010w","010ws",
+                "011a","011as","011d","011ds","011w","011ws",
+                "012a","012as","012d","012ds","012w","012ws",
+                "013a","013as","013d","013ds","013w","013ws",
+                "014a","014as","014d","014ds","014w","014ws",
+                "015a","015as","015d","015ds","015w","015ws",
+                "016a","016as","016d","016ds","016w","016ws",
+                "017a","017as","017d","017ds","017w","017ws",
+                "018a","018as","018d","018ds","018w","018ws",
+                "019a","019as","019d","019ds","019w","019ws",
+                "020a","020as","020d","020ds","020w","020ws",
+                "021a","021as","021d","021ds","021w","021ws",
+                "022a","022as","022d","022ds","022w","022ws",
+                "dicons","icons","wicons"
             ].map(name => `icon/${name}.jpg`)
         ];
 
@@ -222,6 +238,13 @@
             UI.logContainer.scrollTop = UI.logContainer.scrollHeight;
         }
 
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // ====================================================================
+        // 検索メイン：ブラウザから直接るる鯖を取得（CORSプロキシ経由）
+        // ====================================================================
         async function startSearch() {
             const input = document.getElementById('account-name').value.trim();
             if (!input) {
@@ -229,38 +252,119 @@
                 return;
             }
 
+            // HN と トリップ を分離
+            let hn, trip = '';
+            if (input.includes('◆')) {
+                const parts = input.split('◆');
+                hn = parts[0];
+                trip = parts[1];
+            } else {
+                hn = input;
+            }
+
             showStep('step2');
 
             try {
-                // Fetch index pages and log list from backend
-                const response = await fetch(`/api/fetch_index?name=${encodeURIComponent(input)}`);
-                if (!response.ok) throw new Error('サーバーエラーが発生しました。');
-                
-                const data = await response.json();
-                
-                if (data.log_files.length === 0) {
+                const logFiles = new Set();
+                const allTrs   = [];
+                let baseDoc    = null;
+                let page       = 1;
+
+                // 全ページを巡回してログリンクを収集
+                while (true) {
+                    const targetUrl = `${RURU_BASE}/villagerlog.jsp?hn=${encodeURIComponent(hn)}&trip=${encodeURIComponent(trip)}&st=${page}&sort=VILLAGE_NUMBER`;
+                    document.getElementById('loading-text').textContent = `参加した村を検索中... (${page}ページ目)`;
+
+                    const html = await fetchViaProxy(targetUrl);
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+
+                    // ログリンクを抽出
+                    let foundNextPage = false;
+                    doc.querySelectorAll('a[href]').forEach(a => {
+                        const href = a.getAttribute('href') || '';
+                        // ログファイルリンク
+                        const logMatch = href.match(/(log\d*\/log\d+.*\.html)/);
+                        if (logMatch) {
+                            logFiles.add(logMatch[1]);
+                        }
+                        // 次のページへのリンク確認
+                        if (href.includes('villagerlog.jsp') && href.includes(`st=${page + 1}`)) {
+                            foundNextPage = true;
+                        }
+                    });
+
+                    // テーブル行を収集（ページネーション行は除く）
+                    const tbody = doc.querySelector('table#villagerlog tbody');
+                    if (tbody) {
+                        tbody.querySelectorAll('tr').forEach(tr => {
+                            if (!tr.querySelector('td.log_4')) {
+                                allTrs.push(tr.cloneNode(true));
+                            }
+                        });
+                    }
+
+                    if (page === 1) baseDoc = doc;
+                    if (!foundNextPage) break;
+                    page++;
+                    if (page > 200) break;
+                }
+
+                if (logFiles.size === 0) {
                     alert('参加した村が見つかりませんでした。入力名を確認してください。');
                     showStep('step1');
                     return;
                 }
 
+                // マージHTML構築（全ページのTRを1ページに合体）
+                let mergedHtml = '';
+                if (baseDoc) {
+                    const tbody = baseDoc.querySelector('table#villagerlog tbody');
+                    if (tbody) {
+                        tbody.innerHTML = '';
+                        allTrs.forEach(tr => tbody.appendChild(tr));
+                    }
+                    // ページネーションリンク行を削除
+                    baseDoc.querySelectorAll('td.log_4').forEach(td => {
+                        const row = td.closest('tr');
+                        if (row) row.remove();
+                    });
+                    // ログリンクをローカル相対パスに書き換え
+                    baseDoc.querySelectorAll('a[href]').forEach(a => {
+                        const href = a.getAttribute('href') || '';
+                        const logMatch = href.match(/(log\d*\/log\d+.*\.html)/);
+                        if (logMatch) {
+                            a.setAttribute('href', `logs/${logMatch[1].split('/').pop()}`);
+                        }
+                    });
+                    mergedHtml = '<!DOCTYPE html>' + baseDoc.documentElement.outerHTML;
+                }
+
+                const data = {
+                    account: input,
+                    log_files: [...logFiles].sort(),
+                    merged_html: mergedHtml
+                };
+
                 startDownload(data);
 
             } catch (error) {
-                alert(error.message);
+                alert('エラーが発生しました: ' + error.message);
                 showStep('step1');
             }
         }
 
+        // ====================================================================
+        // ダウンロード処理：ログファイル・アセットをZIPに詰める
+        // ====================================================================
         async function startDownload(data) {
             showStep('step3');
             UI.logContainer.innerHTML = '';
-            
+
             const isFullDownload = document.getElementById('full-download').checked;
-            
+
             let targetLogs = data.log_files;
             if (!isFullDownload) {
-                // Filter out _n.html and _r.html
                 targetLogs = targetLogs.filter(p => !p.includes('_n.html') && !p.includes('_r.html'));
             }
 
@@ -268,64 +372,51 @@
             addLog(`${data.account} さんのログアーカイブ（全 ${targetLogs.length} 件）を開始します...`);
 
             const zip = new JSZip();
-            const folderName = `ruru_logs_${data.account.replace(/[^a-zA-Z0-9ぁ-んァ-ヶｱ-ﾝﾞﾟ一-龠◆-]/g, '_')}`;
+            const folderName = `ruru_logs_${data.account.replace(/[^a-zA-Z0-9ぁ-んァ-ヶｱ-ﾝﾞﾟ一-龠◆]/g, '_')}`;
             const folder = zip.folder(folderName);
-            
+
             let successCount = 0;
             let errorCount = 0;
 
-            // 1. Save merged index page
+            // 1. 個人成績ページを保存
             addLog(`個人成績ページ（全ページ合体版）を保存中...`);
             if (data.merged_html) {
                 folder.file("index.html", data.merged_html);
                 addLog(`  -> index.html（検索機能付き）の保存完了`);
-            } else {
-                addLog(`  -> エラー: インデックスデータがありません`);
             }
 
-            // 2. Download Assets (No artificial delay, they are static and fast)
-            addLog(`デザイン適用用のアセット（CSS/JS）を取得中...`);
-            for(const asset of COMMON_ASSETS) {
+            // 2. アセット（CSS/JS/画像）をダウンロード
+            addLog(`デザイン用アセット（CSS/JS）を取得中...`);
+            for (const asset of COMMON_ASSETS) {
                 try {
-                    const res = await fetch(`/api/proxy?path=${encodeURIComponent(asset)}`);
-                    if (res.ok) {
-                        const blob = await res.blob();
-                        folder.file(asset, blob); // Automagically creates css/ or js/ folder inside zip!
-                    }
-                } catch(e) { 
-                    console.error("Asset download failed:", asset, e); 
+                    const blob = await fetchViaProxy(`${RURU_BASE}/${asset}`, true);
+                    folder.file(asset, blob);
+                } catch (e) {
+                    console.warn('Asset download failed:', asset, e);
                 }
             }
             addLog(`  -> アセット取得完了`);
 
-            // 3. Download Logs
+            // 3. ログHTMLをダウンロード
             addLog(`-----------------------------------------`);
             addLog(`ログHTMLのダウンロードを開始します。`);
             addLog(`※1件につき3秒の待機時間を入れています。`);
             addLog(`-----------------------------------------`);
-            
+
             for (let i = 0; i < targetLogs.length; i++) {
-                const logPath = targetLogs[i]; // e.g. log6/log508746_n.html
-                const currentIndex = i + 1;
-                const total = targetLogs.length;
-                
-                // Update UI progress
-                const percent = Math.floor((currentIndex / total) * 100);
+                const logPath    = targetLogs[i];
+                const currentIdx = i + 1;
+                const total      = targetLogs.length;
+                const logFilename = logPath.split('/').pop();
+
+                const percent = Math.floor((currentIdx / total) * 100);
                 UI.progressBar.style.width = `${percent}%`;
                 UI.progressPercent.textContent = `${percent}%`;
-                
-                const logFilename = logPath.split('/').pop();
-                UI.progressText.textContent = `[${currentIndex}/${total}] ${logFilename} を取得中...`;
-                
-                addLog(`取得中: ${logFilename} (${currentIndex}/${total})`);
+                UI.progressText.textContent = `[${currentIdx}/${total}] ${logFilename} を取得中...`;
+                addLog(`取得中: ${logFilename} (${currentIdx}/${total})`);
 
                 try {
-                    const res = await fetch(`/api/proxy?path=${encodeURIComponent(logPath)}`);
-                    if (!res.ok) throw new Error(`Status ${res.status}`);
-                    
-                    const blob = await res.blob();
-                    
-                    // We save logs into the "logs/" folder so that ../css/werewolf.css works perfectly
+                    const blob = await fetchViaProxy(`${RURU_BASE}/${logPath}`, true);
                     folder.file(`logs/${logFilename}`, blob);
                     successCount++;
                     addLog(`  -> 保存成功`);
@@ -334,9 +425,8 @@
                     addLog(`  -> エラー: ${e.message}`);
                 }
 
-                // Wait 3 seconds before next request
                 if (i < targetLogs.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    await sleep(3000);
                 }
             }
 
@@ -346,15 +436,15 @@
             try {
                 const content = await zip.generateAsync({ type: "blob" });
                 saveAs(content, `${folderName}.zip`);
-                
+
                 showStep('step4');
-                document.getElementById('complete-message').innerHTML = 
-                    `個人成績ページ、デザイン用アセット、および ${successCount}件のログを保存しました。<br>` + 
+                document.getElementById('complete-message').innerHTML =
+                    `個人成績ページ、デザイン用アセット、および ${successCount}件のログを保存しました。<br>` +
                     (errorCount > 0 ? `<span class="text-red-400">${errorCount}件の取得エラーがありました。</span>` : '');
-                    
+
             } catch (e) {
                 addLog(`ZIP作成エラー: ${e.message}`);
-                alert("ZIPファイルの作成に失敗しました。");
+                alert('ZIPファイルの作成に失敗しました。');
             }
         }
 
